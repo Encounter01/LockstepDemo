@@ -37,3 +37,13 @@ nul
 
 # Log files
 *.log
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Local learning and interview notes; keep out of the public repository
+阅读顺序/
+LockstepDemo_*.md
+PROJECT_OVERVIEW.md
+STAR_INTRODUCTION.md

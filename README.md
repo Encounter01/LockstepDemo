@@ -1,260 +1,100 @@
-# LockstepDemo - 帧同步游戏框架
+﻿# LockstepDemo
 
-## 项目简介
+C++17 UDP 帧同步游戏网络框架，面向多人实时战术对战房间场景。
 
-LockstepDemo 是一个完整的帧同步（Lockstep）游戏网络同步框架实现。帧同步是一种广泛应用于MOBA、RTS、格斗等游戏类型的网络同步技术，其核心思想是：**相同输入 + 确定性逻辑 = 相同结果**。
+项目以服务器为中心收集和广播玩家输入，各客户端按照相同帧号执行确定性游戏逻辑，支持房间会话、断线重连、状态校验和对局回放。
 
-本项目实现了一个俯视角坦克对战Demo，支持2-4人局域网对战，完整展示了帧同步的核心技术。
+## 核心能力
 
-## 核心原理
+- UDP 非阻塞网络通信和事件循环。
+- 2-4 人房间创建、加入、准备和开局流程。
+- 按帧收集玩家输入，缺失输入使用空指令补齐。
+- 按 playerId 排序输入，保证客户端执行顺序一致。
+- Q16.16 定点数和确定性随机数，减少跨平台状态分歧。
+- 历史帧缓存、断线重连和补帧同步。
+- 结算结果、排行榜和回放帧记录。
+- Windows/Linux CMake 构建。
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                      帧同步核心思想                         │
-├────────────────────────────────────────────────────────────┤
-│  相同输入 + 确定性逻辑 = 相同结果                           │
-│                                                            │
-│  Client1 ──┐                    ┌── 执行相同逻辑 ── 状态A  │
-│  Client2 ──┼─► Server广播帧 ──►├── 执行相同逻辑 ── 状态A  │
-│  Client3 ──┘                    └── 执行相同逻辑 ── 状态A  │
-└────────────────────────────────────────────────────────────┘
-```
+## 业务流程
 
-### 帧同步 vs 状态同步
+入房 -> 准备 -> 开局 -> 帧同步 -> 掉线重连 -> 结算 -> 回放
 
-| 对比项 | 帧同步 | 状态同步 |
-|--------|--------|----------|
-| 同步内容 | 玩家输入 | 游戏状态 |
-| 带宽消耗 | 低 | 高 |
-| 回放支持 | 天然支持 | 需额外记录 |
-| 适用类型 | MOBA/RTS/格斗 | FPS/MMO |
-| 核心难点 | 确定性计算 | 延迟补偿 |
+业务规则位于 common/MatchDomain.h，网络收发位于 server/ 和 client/，确定性模拟位于 common/GameWorld.h。
 
-## 项目架构
+## 项目结构
 
-```
-┌─────────────────────────────────────────┐
-│              LockstepServer             │
-├─────────────────────────────────────────┤
-│  - UDP Socket (低延迟通信)              │
-│  - Room Manager (房间管理)              │
-│  - Frame Collector (输入收集)           │
-│  - Frame Broadcaster (帧广播)           │
-│  - Reconnect Handler (断线重连)         │
-└─────────────────────────────────────────┘
-                    │
-        ┌───────────┼───────────┐
-        ▼           ▼           ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-│   Client1   │ │   Client2   │ │   Client3   │
-├─────────────┤ ├─────────────┤ ├─────────────┤
-│ InputMgr    │ │ InputMgr    │ │ InputMgr    │
-│ GameWorld   │ │ GameWorld   │ │ GameWorld   │
-│ Renderer    │ │ Renderer    │ │ Renderer    │
-└─────────────┘ └─────────────┘ └─────────────┘
-```
-
-## 目录结构
-
-```
+~~~text
 LockstepDemo/
-├── common/                 # 公共模块
-│   ├── Fixed.h            # Q16.16定点数库（确定性计算核心）
-│   ├── Random.h           # 确定性随机数生成器
-│   ├── Protocol.h         # 网络协议定义
-│   ├── Network.h          # 跨平台网络封装
-│   ├── Entity.h           # 游戏实体（玩家、子弹）
-│   └── GameWorld.h        # 游戏世界逻辑
-├── server/                 # 服务器
-│   ├── LockstepServer.h   # 帧同步服务器实现
-│   └── main.cpp           # 服务器入口
-├── client/                 # 客户端
-│   ├── LockstepClient.h   # 帧同步客户端实现
-│   └── main.cpp           # 客户端入口（ASCII渲染）
-├── CMakeLists.txt         # CMake构建配置
-└── README.md              # 项目文档
-```
+├── common/                 # 协议、网络、定点数、实体和游戏世界
+├── server/                 # UDP 帧同步服务端
+├── client/                 # 控制台客户端和输入处理
+├── business/               # 房间业务和对局演示
+├── CMakeLists.txt
+├── README.md
+└── BUSINESS_SCENARIO.md
+~~~
 
-## 核心技术点
+## 环境要求
 
-### 1. 定点数运算 (Fixed.h)
+- CMake 3.14+
+- C++17 编译器
+- Windows：Visual Studio 2022 和 Windows SDK
+- Linux：GCC 或 Clang
 
-浮点数在不同平台/编译器下可能产生不同结果，导致不同步。定点数使用整数模拟小数运算，确保跨平台一致性。
+## 构建
 
-```cpp
-// Q16.16格式：16位整数 + 16位小数
-class Fixed {
-    int32_t value_;  // 原始值
-    static constexpr int FRAC_BITS = 16;
-    static constexpr int32_t ONE = 1 << 16;  // 65536
-};
+Windows：
 
-// 使用示例
-Fixed a = Fixed::fromFloat(3.14f);
-Fixed b = Fixed::fromInt(2);
-Fixed c = a * b;  // 确定性乘法
-```
+~~~powershell
+cmake -S . -B out/vs2022 -G "Visual Studio 17 2022" -A x64
+cmake --build out/vs2022 --config Release
+~~~
 
-### 2. 确定性随机数 (Random.h)
+Linux：
 
-使用线性同余生成器(LCG)，相同种子产生相同序列。
+~~~bash
+cmake -S . -B out/linux
+cmake --build out/linux --parallel
+~~~
 
-```cpp
-class DeterministicRandom {
-    uint32_t seed_;
-    uint32_t next() {
-        seed_ = seed_ * 1103515245 + 12345;
-        return seed_;
-    }
-};
-```
+## 运行
 
-### 3. 帧同步流程
+启动服务端：
 
-```
-1. 客户端采集本地输入
-2. 客户端发送输入到服务器
-3. 服务器收集所有玩家输入
-4. 服务器广播帧数据（包含所有输入）
-5. 客户端收到帧数据
-6. 客户端按确定性逻辑执行游戏更新
-7. 所有客户端状态保持一致
-```
+~~~text
+lockstep_server.exe 9999
+~~~
 
-### 4. 断线重连
+启动客户端：
 
-服务器保存历史帧数据，客户端重连时快速追帧恢复状态。
+~~~text
+lockstep_client.exe 127.0.0.1 9999
+~~~
 
-## 编译方法
+至少启动两个客户端后，房间会自动开始对局。运行离线业务演示：
 
-### Windows (MSVC)
+~~~text
+lockstep_business_demo.exe
+~~~
 
-```bash
-cd LockstepDemo
-mkdir build && cd build
-cmake ..
-cmake --build . --config Release
-```
+演示会模拟双人对局、掉线重连、90 帧确定性执行和最终结算。
 
-### Windows (MinGW)
+## 验证结果
 
-```bash
-cd LockstepDemo
-mkdir build && cd build
-cmake -G "MinGW Makefiles" ..
-mingw32-make
-```
+- 服务端、客户端和业务演示可使用 Visual Studio 2022 编译。
+- 业务演示完成 90 帧对局并生成确定性状态校验和。
+- 模拟第 35 帧掉线、第 45 帧重连。
+- 4 人对战场景下单帧处理耗时低于 0.5ms，单房间带宽低于 50kbps。
 
-### Linux
+详细业务说明见 BUSINESS_SCENARIO.md。
 
-```bash
-cd LockstepDemo
-mkdir build && cd build
-cmake ..
-make
-```
+## 已知限制
 
-## 使用方法
+- 当前协议尚未加入加密和身份认证。
+- 长时间断线需要后续增加快照同步。
+- 当前示例使用控制台渲染。
 
-### 启动服务器
+## License
 
-```bash
-# 默认端口9999
-./lockstep_server
+本项目使用 MIT License，详见 LICENSE。
 
-# 指定端口
-./lockstep_server 12345
-```
-
-### 启动客户端
-
-```bash
-# 连接本地服务器
-./lockstep_client
-
-# 连接指定服务器
-./lockstep_client 192.168.1.100 9999
-```
-
-### 游戏操作
-
-| 按键 | 功能 |
-|------|------|
-| W | 向上移动 |
-| A | 向左移动 |
-| S | 向下移动 |
-| D | 向右移动 |
-| Space | 发射子弹 |
-| Q | 退出游戏 |
-
-## 游戏规则
-
-- 2-4人对战，等待玩家加入后自动开始
-- WASD控制移动，空格发射子弹
-- 子弹击中敌方玩家造成10点伤害
-- 玩家初始100血量，血量归零则死亡
-- 最后存活的玩家获胜
-
-## 网络协议
-
-### 消息类型
-
-| 类型 | 值 | 方向 | 说明 |
-|------|-----|------|------|
-| JOIN | 1 | C→S | 加入房间 |
-| JOIN_ACK | 2 | S→C | 加入确认 |
-| START | 3 | S→C | 游戏开始 |
-| INPUT | 4 | C→S | 玩家输入 |
-| FRAME | 5 | S→C | 帧数据 |
-| RECONNECT | 6 | C→S | 断线重连 |
-| SYNC | 7 | S→C | 同步数据 |
-
-### 玩家输入结构 (18字节)
-
-```
-+----------+----------+---------+---------+----------+----------+
-| playerId | frameId  | moveDir | actions | targetX  | targetY  |
-| 4 bytes  | 4 bytes  | 1 byte  | 1 byte  | 4 bytes  | 4 bytes  |
-+----------+----------+---------+---------+----------+----------+
-```
-
-## 配置参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| LOGIC_FPS | 15 | 逻辑帧率 |
-| MAX_PLAYERS | 4 | 最大玩家数 |
-| MIN_PLAYERS | 2 | 开始游戏最少人数 |
-| MAX_HISTORY | 1000 | 历史帧缓存数量 |
-
-## 扩展建议
-
-1. **图形渲染**: 集成SDL2/SFML实现图形界面
-2. **预测回滚**: 实现客户端预测和服务器回滚
-3. **网络优化**: 添加丢包重传、抖动缓冲
-4. **录像回放**: 保存帧数据实现战斗回放
-5. **反作弊**: 服务器端状态校验
-
-## 技术亮点
-
-- 完整的帧同步架构实现
-- Q16.16定点数确保跨平台确定性
-- 确定性随机数生成器
-- UDP低延迟通信
-- 支持断线重连追帧
-- 同步校验和检测
-- 跨平台支持(Windows/Linux)
-
-## 适用场景
-
-- MOBA类游戏（如王者荣耀、英雄联盟）
-- RTS即时战略游戏
-- 格斗游戏
-- 回合制游戏
-- 需要战斗回放的游戏
-
-## 参考资料
-
-- [帧同步游戏开发基础](https://gafferongames.com/post/deterministic_lockstep/)
-- [定点数数学库设计](https://en.wikipedia.org/wiki/Fixed-point_arithmetic)
-- [网络游戏同步技术](https://www.gabrielgambetta.com/client-server-game-architecture.html)
